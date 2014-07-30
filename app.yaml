@@ -14,5 +14,6 @@ handlers:
 skip_files:
 - ^(.*/)?#.*#$
 - ^(.*/)?.*~$
-- ^/.git/.*$
+- \.gitignore
+- ^\.git/.*
 
