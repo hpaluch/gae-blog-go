@@ -2,9 +2,11 @@ package blog
 
 import (
     "appengine"
+    "appengine/datastore"
     "appengine/user"
     "html/template"
     "net/http"
+    "time"
 )
 
 const htmlHeader =`<html>
@@ -17,6 +19,11 @@ const htmlHeader =`<html>
    {{.Header.LoginMessage}}
    <a href="{{.Header.UserURL}}">{{.Header.UserLabel}}</a>
   </div>
+  {{if .Header.IsAdmin}}
+  <div class="AdminMenu">
+     <a href="/admin/new">New Blog Entry</a>
+  </div>
+  {{end}}
   <h1>{{.Header.Title}}</h1>
 `
 const htmlFooter = `</body>
@@ -86,10 +93,22 @@ func createPageHeader(title string,w http.ResponseWriter,r *http.Request) *PageH
 
 func handlerHome(w http.ResponseWriter, r *http.Request) {
 
+    c := appengine.NewContext(r)
     pageHeader := createPageHeader("Blog Homepage",w,r)
 
-    blogList := make([]BlogListEntry,1)
-    blogList[0] = BlogListEntry{"just-started","title","Descr"}
+    q := datastore.NewQuery("BlogEntry").Order("-Published").Limit(10)
+    blogDBList := make([]DBBlogEntry,0,10)
+    if _, err := q.GetAll(c, &blogDBList); err != nil {
+           http.Error(w, err.Error(), http.StatusInternalServerError)
+           return
+    }
+    blogList := make([]BlogListEntry,len(blogDBList))
+    for i := range blogDBList {
+      blogList[i] = BlogListEntry{ blogDBList[i].Id,
+                       blogDBList[i].Title,
+                       blogDBList[i].Descr,
+                    }  
+    }
 
     data := BlogListPage{pageHeader,blogList}
 
@@ -128,9 +147,88 @@ func handlerEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 
+//////// ADMIN 
+
+type BlogNewPage struct {
+   Header *PageHeader 
+   Error string
+   Id string
+   Title string
+   Descr string
+   Body string
+}
+
+type DBBlogEntry struct {
+     Id string
+     Title string
+     Descr string
+     Body  string 
+     Published time.Time
+     LastModified time.Time
+}
+
+const htmlBlogNewPage = htmlHeader+`
+  <h2>{{.Error}}</h2>
+  <form action="/admin/new" method="POST">
+     <input type="hidden" name="Action" value="Store" />
+     <input type="text" name="Id" value="{{.Id}}" />
+     <input type="text" name="Title" value="{{.Title}}" />
+     <textarea name="Descr">
+         {{.Descr}}
+     </textarea>
+     <textarea name="Body">
+         {{.Body}}
+     </textarea>
+     <input type="submit" name="Save"   value="Save2"/>
+  </form>
+`+htmlFooter;
+
+var pageBlogNewTemplate = template.Must(template.New("blogNewPage").Parse(htmlBlogNewPage))
+
+
+func handlerAdminNew(w http.ResponseWriter, r *http.Request) {
+
+    c := appengine.NewContext(r)
+    pageHeader := createPageHeader("New Blog Entry",w,r)
+
+    errorStr := "NoError"
+    if r.FormValue("Action") == "Store" {
+       errorStr = "Saving data" 
+       id := r.FormValue("Id")
+       b := DBBlogEntry{ Id: id,
+                  Title: r.FormValue("Title"),
+                  Descr: r.FormValue("Descr"),
+                  Body:  r.FormValue("Body"),
+                  Published: time.Now(),
+                  LastModified: time.Now(),
+            }
+      key := datastore.NewKey(c,"BlogEntry",id,0,nil)
+      _, err := datastore.Put(c, key, &b)
+      if err != nil {
+           errorStr = err.Error()
+      } else {
+         http.Redirect(w, r, "/", http.StatusFound)
+         return
+      }
+
+    } else {
+       errorStr = "Clean form" 
+    }
+
+    data := BlogNewPage{Header:pageHeader,Error:errorStr}
+
+    err := pageBlogNewTemplate.Execute(w, data)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
+}
+
+
+
 func init() {
     http.HandleFunc("/", handlerHome)
     http.HandleFunc("/entry/", handlerEntry)
+    http.HandleFunc("/admin/new", handlerAdminNew)
 }
 
 
