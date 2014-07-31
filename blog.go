@@ -2,7 +2,6 @@ package blog
 
 import (
     "appengine"
-    "appengine/datastore"
     "appengine/user"
     "html/template"
     "net/http"
@@ -96,13 +95,13 @@ func handlerHome(w http.ResponseWriter, r *http.Request) {
     c := appengine.NewContext(r)
     pageHeader := createPageHeader("Blog Homepage",w,r)
 
-    q := datastore.NewQuery("BlogEntry").Order("-Published").Limit(10)
-    blogDBList := make([]DBBlogEntry,0,10)
-    if _, err := q.GetAll(c, &blogDBList); err != nil {
-           http.Error(w, err.Error(), http.StatusInternalServerError)
-           return
+    blogDBList,err := DBgetList(c)
+    if err != nil {
+          http.Error(w, err.Error(), http.StatusInternalServerError)
+          return;
     }
-    blogList := make([]BlogListEntry,len(blogDBList))
+
+   blogList := make([]BlogListEntry,len(blogDBList))
     for i := range blogDBList {
       blogList[i] = BlogListEntry{ blogDBList[i].Id,
                        blogDBList[i].Title,
@@ -112,7 +111,7 @@ func handlerHome(w http.ResponseWriter, r *http.Request) {
 
     data := BlogListPage{pageHeader,blogList}
 
-    err := pageTemplate.Execute(w, data)
+    err = pageTemplate.Execute(w, data)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
     }
@@ -158,15 +157,6 @@ type BlogNewPage struct {
    Body string
 }
 
-type DBBlogEntry struct {
-     Id string
-     Title string
-     Descr string
-     Body  string 
-     Published time.Time
-     LastModified time.Time
-}
-
 const htmlBlogNewPage = htmlHeader+`
   <h2>{{.Error}}</h2>
   <form action="/admin/new" method="POST">
@@ -202,15 +192,13 @@ func handlerAdminNew(w http.ResponseWriter, r *http.Request) {
                   Published: time.Now(),
                   LastModified: time.Now(),
             }
-      key := datastore.NewKey(c,"BlogEntry",id,0,nil)
-      _, err := datastore.Put(c, key, &b)
+      err := DBstoreDBBlogEntry(c,&b)
       if err != nil {
            errorStr = err.Error()
       } else {
          http.Redirect(w, r, "/", http.StatusFound)
          return
       }
-
     } else {
        errorStr = "Clean form" 
     }
