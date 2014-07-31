@@ -11,6 +11,14 @@ import (
 const htmlHeader =`<html>
  <head>
   <title>{{.Header.Title}}</title>
+  <style>
+     label, input {
+          display: block;
+     }
+     .Errors {
+         color: red;
+     }     
+  </style>
  </head>
  <body>
   <div class="Header"><a href="/">Home</a></div>
@@ -150,26 +158,18 @@ func handlerEntry(w http.ResponseWriter, r *http.Request) {
 
 type BlogNewPage struct {
    Header *PageHeader 
-   Error string
-   Id string
-   Title string
-   Descr string
-   Body string
+   Errors []error
+   FormBody template.HTML
 }
 
 const htmlBlogNewPage = htmlHeader+`
-  <h2>{{.Error}}</h2>
+  <ul class="Errors">
+      {{range .Errors}}
+      <li>{{.}}</li>
+      {{end}}
+  </ul>
   <form action="/admin/new" method="POST">
-     <input type="hidden" name="Action" value="Store" />
-     <input type="text" name="Id" value="{{.Id}}" />
-     <input type="text" name="Title" value="{{.Title}}" />
-     <textarea name="Descr">
-         {{.Descr}}
-     </textarea>
-     <textarea name="Body">
-         {{.Body}}
-     </textarea>
-     <input type="submit" name="Save"   value="Save2"/>
+     {{.FormBody}}
   </form>
 `+htmlFooter;
 
@@ -181,31 +181,51 @@ func handlerAdminNew(w http.ResponseWriter, r *http.Request) {
     c := appengine.NewContext(r)
     pageHeader := createPageHeader("New Blog Entry",w,r)
 
-    errorStr := "NoError"
-    if r.FormValue("Action") == "Store" {
-       errorStr = "Saving data" 
-       id := r.FormValue("Id")
-       b := DBBlogEntry{ Id: id,
-                  Title: r.FormValue("Title"),
-                  Descr: r.FormValue("Descr"),
-                  Body:  r.FormValue("Body"),
-                  Published: time.Now(),
-                  LastModified: time.Now(),
-            }
-      err := DBstoreDBBlogEntry(c,&b)
-      if err != nil {
-           errorStr = err.Error()
-      } else {
-         http.Redirect(w, r, "/", http.StatusFound)
-         return
-      }
-    } else {
-       errorStr = "Clean form" 
+    items := []FormItem{
+         {"hidden","Action","","Store",false},
+         {"text","Id","Slug (Id)",r.FormValue("Id"),true},
+         {"text","Title","Title",r.FormValue("Title"),true},
+         {"textarea","Descr","Description",r.FormValue("Descr"),true},
+         {"textarea","Body","Body",r.FormValue("Body"),true},
+         {"submit","Submit","","Save",false},
     }
 
-    data := BlogNewPage{Header:pageHeader,Error:errorStr}
+    errors := make([]error,0)
 
-    err := pageBlogNewTemplate.Execute(w, data)
+    if r.FormValue("Action") == "Store" {
+
+       errors = FormValidate(r,items)
+
+       if len(errors) == 0 {
+
+	       id := r.FormValue("Id")
+	       b := DBBlogEntry{ Id: id,
+			  Title: r.FormValue("Title"),
+			  Descr: r.FormValue("Descr"),
+			  Body:  r.FormValue("Body"),
+			  Published: time.Now(),
+			  LastModified: time.Now(),
+		    }
+	      err := DBstoreDBBlogEntry(c,&b)
+	      if err != nil {
+                   errors = append(errors,err)
+	      } else {
+		 http.Redirect(w, r, "/", http.StatusFound)
+		 return
+	      }
+      }
+    }
+    formHtml,err := FormRenderItems( items)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
+    data := BlogNewPage{
+                 Header:pageHeader,
+                 Errors:errors,
+                 FormBody:formHtml,
+    }
+
+    err = pageBlogNewTemplate.Execute(w, data)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
     }
